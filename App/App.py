@@ -8,20 +8,20 @@ from reportlab.pdfgen import canvas
 st.set_page_config(page_title="Tutor Virtual", layout="centered")
 
 def generar_pdf(
-    nombre: str,
-    edad: int,
-    sexo: str,
-    curso: str,
-    establecimiento: str,
-    asignatura: str,
-    asistencia: double,
-    promedio: float,
-    notas_libres: str,
-    score: float,
-    drivers: List[str],
-    citations: List[str],
-    plan_apoyo: str,
-)
+    nombre,
+    edad,
+    sexo,
+    curso,
+    establecimiento,
+    asignatura,
+    asistencia,
+    promedio,
+    notas_libres,
+    score,
+    drivers,
+    citations,
+    plan_apoyo,
+);
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     c = canvas.Canvas(tmp.name, pagesize=A4)
     w, h = A4
