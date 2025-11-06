@@ -1,4 +1,4 @@
-# 🎓 Desafío Educación – Tutor Virtual Adaptativo con IA Híbrida
+# Desafío Educación – Tutor Virtual Adaptativo con IA Híbrida
 
 La educación siempre ha sido un espacio donde la tecnología puede marcar una gran diferencia. Este proyecto nace con una idea simple pero poderosa: **apoyar a estudiantes en riesgo de deserción mediante inteligencia artificial**, de una forma ética, empática y verdaderamente útil.
 
@@ -6,7 +6,7 @@ El desafío consiste en construir un **Tutor Virtual Adaptativo**, una herramien
 
 ---
 
-## 🧭 ¿De qué trata el proyecto?
+## ¿De qué trata el proyecto?
 
 La misión es diseñar un sistema que combine lo mejor de dos mundos:
 
@@ -23,7 +23,7 @@ El sistema debe recibir información de cada estudiante (como su edad, rendimien
 
 ---
 
-## 🧠 La arquitectura híbrida
+## La arquitectura híbrida
 
 El proyecto se construye sobre una arquitectura modular que combina algoritmos de predicción con modelos de lenguaje. En términos simples, se compone de cinco grandes piezas:
 
@@ -37,7 +37,7 @@ El proyecto se construye sobre una arquitectura modular que combina algoritmos d
 
 ---
 
-## 💡 Qué hace único a este tutor virtual
+## Qué hace único a este tutor virtual
 
 El verdadero valor de este proyecto está en su enfoque humano. No se trata solo de calcular probabilidades, sino de **dar sentido a los datos educativos** y ofrecer una **respuesta empática y constructiva**.
 
