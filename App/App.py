@@ -21,7 +21,7 @@ def generar_pdf(
     drivers,
     citations,
     plan_apoyo,
-);
+):
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     c = canvas.Canvas(tmp.name, pagesize=A4)
     w, h = A4
