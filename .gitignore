@@ -1,0 +1,63 @@
+# ===============================
+# General Python / ML .gitignore
+# ===============================
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
+
+# Archivos de entorno virtual
+venv/
+.env/
+.envrc
+*.env
+*.venv
+*.pyc
+__pycache__/
+
+# Archivos de Jupyter Notebook temporales
+.ipynb_checkpoints/
+
+# Archivos grandes / datasets
+*.csv
+*.tsv
+*.xlsx
+*.xls
+*.json
+*.zip
+*.gz
+*.tar
+*.rar
+*.h5
+*.pkl
+*.joblib
+
+# Modelos exportados
+*.h5
+*.pt
+*.pth
+*.onnx
+
+# Logs y resultados temporales
+*.log
+*.tmp
+*.out
+*.bak
+
+# Directorios de salida o compilación
+build/
+dist/
+*.egg-info/
+
+# Archivos de control de versiones locales
+
+.gitattributes
+
+# IDEs y editores
+.vscode/
+.idea/
+*.code-workspace
+
+# Archivos de caché
+.cache/
+__pycache__/
