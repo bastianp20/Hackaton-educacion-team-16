@@ -8,7 +8,7 @@ joblib
 pyarrow
 
 # LLM / NLP
-openai
+openai>=1.3.5
 langchain
 faiss-cpu
 sentence-transformers
