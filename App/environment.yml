@@ -1,1 +1,13 @@
+name: tutor-virtual
 
+variables: 
+  TUTOR_API_URL: "https://"
+  USE_MOCK: "False"  
+
+dependencies:
+  -python=3.10
+  -pip
+  -pip:
+      -streamlit
+      -requests
+      -reportlab
