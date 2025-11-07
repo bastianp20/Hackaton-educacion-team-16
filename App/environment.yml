@@ -16,5 +16,7 @@ dependencies:
       -pandas
       -numpy
       -matplotlib
-      -
-      #
+      -uvicorn
+      -scikit-learn
+      -joblib
+      -pyarrow
