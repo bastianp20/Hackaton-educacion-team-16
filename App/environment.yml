@@ -12,3 +12,4 @@ dependencies:
       -streamlit
       -requests
       -reportlab
+      -fastapi
