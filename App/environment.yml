@@ -2,6 +2,7 @@ name: tutor-virtual
 
 variables: 
   TUTOR_API_URL: "https://"
+  //falta regenar la url con la final//
   USE_MOCK: "False"  
 
 dependencies:
