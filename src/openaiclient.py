@@ -1,6 +1,6 @@
 from openai import OpenAI
 
-# 🔐 Reemplaza con tu clave de API de OpenAI
+#Reemplaza con tu clave de API de OpenAI
 client = OpenAI(api_key="YOUR_API_KEY")
 
 def generar_respuesta(prompt):
@@ -8,7 +8,7 @@ def generar_respuesta(prompt):
     Envía un prompt al modelo de OpenAI y devuelve la respuesta generada.
     """
     response = client.chat.completions.create(
-        model="gpt-4o-mini",  # puedes usar gpt-4.1 o gpt-3.5-turbo
+        model="gpt-4o-mini", 
         messages=[
             {"role": "system", "content": "Eres un asistente educativo experto en análisis de riesgo de deserción."},
             {"role": "user", "content": prompt}
