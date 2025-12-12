@@ -11,6 +11,7 @@ dependencies:
   -pip
   -pip:
       -streamlit
+      - openai
       -requests
       -reportlab
       -pandas

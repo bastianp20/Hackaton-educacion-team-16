@@ -1,0 +1,24 @@
+# Core
+streamlit>=1.31.0
+numpy
+pandas
+scikit-learn
+xgboost
+joblib
+pyarrow
+
+# LLM / NLP
+openai>=1.3.5
+langchain
+faiss-cpu
+sentence-transformers
+tiktoken
+
+# Utilidades
+python-dotenv
+requests
+regex
+
+# Visualización
+matplotlib
+seaborn
