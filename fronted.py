@@ -1,22 +1,44 @@
 import json
 import random
-from io import BytesIO
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List
+import os
 
+import joblib
+import numpy as np
 import streamlit as st
 
 # =========================
 # CONFIGURACIÓN GENERAL
 # =========================
-st.set_page_config(page_title="Tutor Virtual Adaptativo - Demo", page_icon="🎓", layout="centered")
+st.set_page_config(
+    page_title="Tutor Virtual Adaptativo - Demo",
+    page_icon="🎓",
+    layout="centered",
+)
 
-# ---------- Guardrails visibles (B3)
 st.title("🎓 Tutor Virtual Adaptativo — Demo (Chatbot)")
 st.warning(
     "Este sistema ofrece orientación educativa **no diagnóstica** basada en la información que entregas. "
     "Para evaluaciones formales o apoyo especializado, consulta a profesionales de la educación o salud.",
     icon="⚠️",
 )
+
+# =========================
+# CARGA DEL MODELO ENTRENADO
+# =========================
+MODEL_PATH = os.path.join("modelo-regresion/modelo_riesgo_desercion.pkl")
+
+try:
+    modelo = joblib.load(MODEL_PATH)
+except Exception as e:
+    st.error(
+        "❌ No se pudo cargar el modelo entrenado.\n\n"
+        f"Ruta esperada: `{MODEL_PATH}`\n\n"
+        "Verifica que el archivo exista y que se haya guardado correctamente "
+        "con `joblib.dump(pipeline, 'modelo_logistic_regression.pkl')`.",
+        icon="🚫",
+    )
+    st.stop()
 
 # =========================
 # ESTADO DE LA APLICACIÓN
@@ -28,7 +50,13 @@ def init_state():
         # stages: collect -> confirm -> predicted -> coaching
         st.session_state.stage = "collect"
     if "profile_json" not in st.session_state:
-        st.session_state.profile_json: Dict[str, Any] = {}
+        st.session_state.profile_json: Dict[str, Any] = {
+            "edad": None,
+            "sexo": None,
+            "promedio": None,
+            "asistencia_pct": None,
+            "asignatura_dificil": None,
+        }
     if "score" not in st.session_state:
         st.session_state.score = None
     if "drivers" not in st.session_state:
@@ -56,7 +84,7 @@ def render_chat():
             st.markdown(m["content"])
 
 # =========================
-# EXTRACCIÓN NL → JSON (SIMULADA)
+# EXTRACCIÓN NL → JSON (HEURÍSTICA)
 # =========================
 def extract_profile_from_text(text: str) -> Dict[str, Any]:
     """
@@ -66,30 +94,33 @@ def extract_profile_from_text(text: str) -> Dict[str, Any]:
     """
     import re
 
-    # Normalización simple
     t = text.lower()
 
     # Edad
     edad = None
-    m_edad = re.search(r"(\d{1,2})\s*(años|anios|edad)", t) or re.search(r"edad\s*[:=]?\s*(\d{1,2})", t)
+    m_edad = re.search(r"(\d{1,2})\s*(años|anios|edad)", t) or re.search(
+        r"edad\s*[:=]?\s*(\d{1,2})", t
+    )
     if m_edad:
-        # si grupo 1; si hay dos grupos toma el num
         for g in m_edad.groups():
             if g and g.isdigit():
-                edad = int(g); break
+                edad = int(g)
+                break
 
     # Sexo
     sexo = None
-    if "masculino" in t or "hombre" in t or "varón" in t or "varon" in t:
+    if any(w in t for w in ["masculino", "hombre", "varón", "varon"]):
         sexo = "Masculino"
-    elif "femenino" in t or "mujer" in t:
+    elif any(w in t for w in ["femenino", "mujer"]):
         sexo = "Femenino"
-    elif "no binario" in t or "nobinario" in t or "nb" in t:
+    elif any(w in t for w in ["no binario", "nobinario", "nb"]):
         sexo = "No binario"
 
     # Promedio (1.0 a 7.0)
     promedio = None
-    m_prom = re.search(r"(promedio|nota[s]?\s*promedio)\s*[:=]?\s*([1-7](?:[.,]\d{1,2})?)", t)
+    m_prom = re.search(
+        r"(promedio|nota[s]?\s*promedio)\s*[:=]?\s*([1-7](?:[.,]\d{1,2})?)", t
+    )
     if m_prom:
         promedio = float(m_prom.group(2).replace(",", "."))
 
@@ -101,10 +132,9 @@ def extract_profile_from_text(text: str) -> Dict[str, Any]:
 
     # Asignatura que cuesta
     asignatura = None
-    # frases tipo "me cuesta X", "dificultad en X"
     m_asig = re.search(
         r"(me\s+cuesta|dificultad\s+en|complica\s+|problema\s+con)\s+([a-záéíóúñ ]{3,})",
-        t
+        t,
     )
     if m_asig:
         asignatura = m_asig.group(2).strip().title()
@@ -112,106 +142,93 @@ def extract_profile_from_text(text: str) -> Dict[str, Any]:
     return {
         "edad": edad,
         "sexo": sexo,
-        "promedio": promedio,         # escala 1–7 asumida (Chile)
-        "asistencia_pct": asistencia, # 0–100
+        "promedio": promedio,          # escala 1–7
+        "asistencia_pct": asistencia,  # 0–100
         "asignatura_dificil": asignatura,
     }
 
 # =========================
-# SIMULACIÓN DE API (FastAPI)
+# SIMULACIÓN COACH (PLAN)
 # =========================
-USE_REQUESTS = False  # pon True si ya tienes endpoints reales
-API_BASE = "http://localhost:8000"
-
-def simulate_predict(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Simula POST /predict
-    Regla simple: menor promedio y menor asistencia => mayor score
-    Drivers según umbrales.
-    """
-    prom = payload.get("promedio")
-    asis = payload.get("asistencia_pct")
-    asign = payload.get("asignatura_dificil")
-
-    # Normalización de score (heurística didáctica)
-    # promedio 1–7 -> inverting scale to risk: lower avg => higher risk
-    prom_component = 0.0
-    if isinstance(prom, (int, float)):
-        prom_component = (7.0 - max(1.0, min(7.0, float(prom)))) / 6.0  # 0..1
-
-    asis_component = 0.0
-    if isinstance(asis, (int, float)):
-        asis_f = max(0.0, min(100.0, float(asis)))
-        asis_component = (100.0 - asis_f) / 100.0  # 0..1
-
-    base = 0.35 * prom_component + 0.5 * asis_component + 0.1
-    # ruido leve para variabilidad
-    score = max(0.0, min(1.0, base + random.uniform(-0.03, 0.03)))
-
-    drivers = []
-    if isinstance(asis, (int, float)) and asis < 85:
-        drivers.append("Asistencia menor a 85%")
-    if isinstance(prom, (int, float)) and prom < 4.5:
-        drivers.append("Promedio académico bajo")
-    if asign:
-        drivers.append(f"Dificultad en {asign}")
-
-    if not drivers:
-        drivers = ["Hábitos a fortalecer (sueño, estudio, apoyo)"]
-
-    return {"score": round(score, 2), "drivers": drivers}
-
 def simulate_coach(payload: Dict[str, Any]) -> str:
     """
-    Simula POST /coach -> plan de hábitos en texto.
-    Personaliza según drivers.
+    Genera un plan de hábitos en texto, personalizado según drivers y score.
     """
+    profile = payload.get("profile", {})
     drivers = payload.get("drivers", [])
-    recomendaciones = [
-        "Establecer horarios consistentes de estudio (bloques de 25–40 min + pausas breves).",
-        "Planificar repasos semanales con foco en contenidos clave.",
-        "Dormir 7–9 horas, manteniendo higiene del sueño.",
-        "Solicitar retroalimentación breve al/la docente tras evaluaciones.",
-        "Usar un registro semanal de asistencia y motivos de ausencias."
-    ]
-    extra = []
-    for d in drivers:
-        d_low = d.lower()
-        if "asistencia" in d_low:
-            extra.append("Coordinar recordatorios y transporte para llegar a tiempo; conversar con tutor/a sobre barreras de asistencia.")
-        if "promedio" in d_low:
-            extra.append("Practicar 3 ejercicios diarios de la asignatura con mayor dificultad y resolver dudas en tutorías.")
-        if "dificultad" in d_low:
-            extra.append("Realizar mapas conceptuales y ejercicios guiados para la asignatura desafiadora, 3 veces por semana.")
+    score = payload.get("score", 0.0)
 
-    plan = "Plan Personalizado de Hábitos (no diagnóstico)\n\n"
-    plan += "Objetivo: fortalecer hábitos y apoyo oportuno para mejorar el proceso de aprendizaje.\n\n"
-    plan += "Recomendaciones generales:\n"
+    edad = profile.get("edad")
+    promedio = profile.get("promedio")
+    asistencia = profile.get("asistencia_pct")
+    asign = profile.get("asignatura_dificil")
+
+    recomendaciones = []
+
+    recomendaciones.append(
+        "💡 **Organización suave pero constante:** elige 3 momentos fijos a la semana para estudiar, aunque sean 25–30 minutos. Lo importante es la constancia, no la perfección."
+    )
+    recomendaciones.append(
+        "🧠 **Técnicas de estudio amigables:** subrayar, hacer resúmenes cortos y explicar el contenido en voz alta como si se lo contaras a un amigo."
+    )
+    recomendaciones.append(
+        "😴 **Cuidar el descanso:** dormir entre 7 y 9 horas ayuda muchísimo a la memoria y al ánimo. Estudiar muerto de sueño casi nunca resulta."
+    )
+
+    if isinstance(asistencia, (int, float)) and asistencia < 85:
+        recomendaciones.append(
+            "📅 **Asistencia:** intenta identificar qué te está impidiendo ir a clases (ánimo, transporte, horarios, responsabilidades). "
+            "Hablarlo con un/a profesor/a o tutor/a puede abrir opciones que quizás no has considerado."
+        )
+
+    if isinstance(promedio, (int, float)) and promedio < 4.5:
+        recomendaciones.append(
+            "📚 **Promedio bajo:** enfócate primero en pasar de 'no entiendo nada' a 'entiendo lo básico'. "
+            "Escoge 2 o 3 contenidos clave y repásalos varias veces a la semana."
+        )
+
+    if asign:
+        recomendaciones.append(
+            f"📘 **Asignatura que más te cuesta ({asign}):** busca ejercicios resueltos paso a paso y videos explicativos. "
+            "Luego intenta hacer tú mismo/a un ejercicio similar y compáralo."
+        )
+
+    if edad and edad < 18:
+        recomendaciones.append(
+            "🤝 **No estás solo/a:** si estás en enseñanza básica o media, apoyarte en tu familia, algún profe de confianza o un orientador puede marcar la diferencia. "
+            "Pedir ayuda no es señal de debilidad, es una estrategia inteligente."
+        )
+
+    if score is not None and score >= 0.75:
+        recomendaciones.append(
+            "🚨 **Nivel de riesgo alto:** sería muy bueno que converses con alguien del establecimiento "
+            "(profesor jefe, orientador, encargado de convivencia) y les muestres que te preocupa tu situación. "
+            "No tienes que cargar todo esto solo/a."
+        )
+    elif score is not None and score >= 0.5:
+        recomendaciones.append(
+            "🟠 **Riesgo moderado:** estás a tiempo de ajustar hábitos. Cambios pequeños pero constantes (asistir más, aprovechar clases, preguntar dudas) "
+            "pueden bajar mucho ese riesgo."
+        )
+    else:
+        recomendaciones.append(
+            "🟢 **Riesgo más bien bajo:** aun así, es buena idea mantener los hábitos positivos. "
+            "Si en algún momento sientes que el estrés aumenta, vuelve a revisar este plan y ajusta lo que necesites."
+        )
+
+    plan = "### 🗂️ Plan Personalizado de Hábitos (no diagnóstico)\n\n"
+    plan += "Este plan está pensado para acompañarte, no para juzgarte. Tómatelo como una guía flexible, "
+    plan += "que puedes adaptar a tu realidad día a día.\n\n"
+
     for i, r in enumerate(recomendaciones, 1):
-        plan += f"  {i}. {r}\n"
-    if extra:
-        plan += "\nEnfoques específicos según necesidades:\n"
-        for i, r in enumerate(extra, 1):
-            plan += f"  {i}. {r}\n"
-    plan += "\nRecursos sugeridos: calendario semanal, app de recordatorios, guía de estudio por asignatura."
+        plan += f"{i}. {r}\n\n"
+
+    plan += (
+        "Recuerda: avanzar lento también es avanzar. Y no tienes por qué hacerlo solo/a; "
+        "buscar apoyo es parte del camino. 💛"
+    )
+
     return plan
-
-def call_predict(payload: Dict[str, Any]) -> Dict[str, Any]:
-    if USE_REQUESTS:
-        import requests
-        r = requests.post(f"{API_BASE}/predict", json=payload, timeout=10)
-        r.raise_for_status()
-        return r.json()
-    return simulate_predict(payload)
-
-def call_coach(payload: Dict[str, Any]) -> str:
-    if USE_REQUESTS:
-        import requests
-        r = requests.post(f"{API_BASE}/coach", json=payload, timeout=10)
-        r.raise_for_status()
-        # asume {"plan": "..."}
-        return r.json().get("plan", "")
-    return simulate_coach(payload)
 
 # =========================
 # FUNCIÓN: DESCARGA SIMULADA PDF
@@ -225,29 +242,59 @@ def make_fake_pdf_bytes(text: str) -> bytes:
     return content.encode("utf-8")
 
 # =========================
-# FUNCIÓN: LINK COMPARTIBLE
+# PREDICCIÓN CON MODELO REAL
 # =========================
-def build_share_link(score: float, drivers: List[str], token: str) -> str:
-    qp = st.query_params
-    qp["score"] = str(score)
-    qp["drivers"] = json.dumps(drivers, ensure_ascii=False)
-    qp["ref"] = token
-    # Streamlit muestra la URL actual con esos parámetros
-    return st.experimental_get_query_params() or {}  # mantener compatibilidad
+def call_predict_with_model(profile: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Usa el modelo real de regresión logística.
+    Se asume que fue entrenado con las features:
+    [promedio, asistencia_pct, edad, dependencia]
+    De momento usamos dependencia fija = Municipal (1).
+    """
+    prom = profile.get("promedio")
+    asis = profile.get("asistencia_pct")
+    edad = profile.get("edad")
 
-def get_current_url() -> str:
-    # Método aproximado para recuperar la URL visible (Streamlit no provee url absoluta estándar)
-    # Instruimos al usuario a copiar desde la barra del navegador.
-    return "Copia esta URL desde tu navegador; incluye los parámetros actuales."
+    # Defaults suaves si falta algo
+    if prom is None:
+        prom = 5.0
+    if asis is None:
+        asis = 85.0
+    if edad is None:
+        edad = 18
+
+    dep = 1  # Municipal por defecto
+
+    X = np.array([[float(prom), float(asis), float(edad), float(dep)]])
+    prob_riesgo = float(modelo.predict_proba(X)[0][1])
+    pred_clase = int(modelo.predict(X)[0])
+
+    drivers = []
+    if asis < 85:
+        drivers.append("Asistencia menor a 85%")
+    if prom < 4.5:
+        drivers.append("Promedio académico bajo")
+    asign = profile.get("asignatura_dificil")
+    if asign:
+        drivers.append(f"Dificultad en {asign}")
+    if not drivers:
+        drivers.append("Hábitos a fortalecer (sueño, estudio, apoyo)")
+
+    return {
+        "score": round(prob_riesgo, 2),
+        "pred_class": pred_clase,
+        "drivers": drivers,
+    }
 
 # =========================
 # ARRANQUE DEL CHATBOT
 # =========================
 if len(st.session_state.messages) == 0:
     add_assistant(
-        "¡Hola! Estoy aquí para ofrecer orientación **no diagnóstica** y apoyarte en tu proceso de aprendizaje. "
-        "Para comenzar, por favor cuéntame tu perfil en texto libre. "
-        "Por ejemplo: *“Tengo 16 años, masculino, promedio 5.1, asistencia 82%, me cuesta matemáticas.”*"
+        "💬 Hola, gracias por estar aquí. Este espacio es para acompañarte y mirar tu situación académica con calma.\n\n"
+        "Para empezar, cuéntame un poco sobre ti: por ejemplo tu **edad**, tu **promedio**, tu **asistencia** "
+        "y si hay alguna asignatura que te esté costando.\n\n"
+        "Ejemplo: *“Tengo 17 años, promedio 5.1, asistencia 82%, y me cuesta matemáticas.”*"
     )
 
 # Render historial
@@ -256,21 +303,49 @@ render_chat()
 # =========================
 # INPUT DEL USUARIO
 # =========================
-user_input = st.chat_input("Escribe aquí (edad, sexo, promedio, asistencia, asignatura que te cuesta)…")
+user_input = st.chat_input(
+    "Escribe aquí (edad, promedio, asistencia, asignatura que te cuesta)…"
+)
 
 if user_input:
     add_user(user_input)
 
-    if st.session_state.stage == "collect":
-        profile = extract_profile_from_text(user_input)
-        st.session_state.profile_json = profile
+    # Unimos lo que ya teníamos con lo nuevo
+    extracted = extract_profile_from_text(user_input)
+    profile = st.session_state.profile_json.copy()
+    for k, v in extracted.items():
+        if v is not None:
+            profile[k] = v
+    st.session_state.profile_json = profile
 
-        # Respuesta del asistente con los datos estructurados
-        pretty = json.dumps(profile, indent=2, ensure_ascii=False)
+    # Campos clave que necesitamos para el modelo
+    needed_core = ["edad", "promedio", "asistencia_pct"]
+    missing = [k for k in needed_core if st.session_state.profile_json.get(k) is None]
+
+    if missing and st.session_state.stage == "collect":
+        # Preguntamos de forma amable por lo que falta
+        etiquetas = {
+            "edad": "tu edad",
+            "promedio": "tu promedio general (entre 1.0 y 7.0)",
+            "asistencia_pct": "tu porcentaje de asistencia aproximado",
+        }
+        faltantes_txt = ", ".join(etiquetas[m] for m in missing)
+        resumen = json.dumps(st.session_state.profile_json, indent=2, ensure_ascii=False)
+
         add_assistant(
-            "Gracias por la información. Esto es lo que interpreté (puedes corregir si algo no es exacto):\n\n"
+            "Gracias por compartir 💛. Esto es lo que llevo entendido hasta ahora:\n\n"
+            f"```json\n{resumen}\n```\n"
+            f"Para poder orientarte mejor, aún necesito que me cuentes un poco más sobre: **{faltantes_txt}**.\n\n"
+            "Puedes responder en lenguaje natural, como si estuviéramos conversando."
+        )
+    else:
+        # Ya tenemos lo clave → pasamos a confirmación
+        pretty = json.dumps(st.session_state.profile_json, indent=2, ensure_ascii=False)
+        add_assistant(
+            "Perfecto, con esta información ya puedo hacer una estimación inicial.\n\n"
+            "Esto es lo que interpreté de tu perfil (si algo no está bien, puedes corregirlo escribiendo de nuevo):\n\n"
             f"```json\n{pretty}\n```\n"
-            "Si está bien, presiona **Confirmar datos** para estimar tu nivel de riesgo (no diagnóstico)."
+            "Si estás de acuerdo, aprieta el botón **Confirmar datos y estimar riesgo** en la parte principal."
         )
         st.session_state.stage = "confirm"
 
@@ -280,92 +355,100 @@ if user_input:
 with st.sidebar:
     st.subheader("Flujo de la demo")
     st.markdown(
-        "- ✅ Recolección (texto libre)\n"
-        "- ✅ Mostrar NL→JSON (confirmación)\n"
-        "- ✅ Predicción con drivers\n"
-        "- ✅ Umbral de derivación\n"
+        "- ✅ Conversación y recolección de datos\n"
+        "- ✅ Perfil estructurado NL→JSON\n"
+        "- ✅ Predicción de riesgo (modelo real)\n"
+        "- ✅ Mensaje de acompañamiento\n"
         "- ✅ Plan personalizado\n"
-        "- ✅ Exportar y compartir"
+        "- ✅ Exportar (PDF simulado)"
     )
     st.caption("Simulación educativa — No diagnóstico.")
 
 # --- Etapa: Confirmación de datos y predicción
 if st.session_state.stage == "confirm":
-    st.markdown("### 📦 Datos interpretados (simulados NL→JSON)")
+    st.markdown("### 📦 Perfil interpretado")
     st.json(st.session_state.profile_json)
 
     cols = st.columns(2)
     with cols[0]:
-        if st.button("✔️ Confirmar datos y predecir", use_container_width=True):
-            # Llamada a /predict (simulada o real)
-            result = call_predict(st.session_state.profile_json)
+        if st.button("✔️ Confirmar datos y estimar riesgo", use_container_width=True):
+            result = call_predict_with_model(st.session_state.profile_json)
             st.session_state.score = result["score"]
             st.session_state.drivers = result["drivers"]
+            pred_class = result["pred_class"]
 
-            # Mensajes al chat
+            mensaje_riesgo = (
+                "⚠️ Según el modelo, actualmente **apareces con riesgo de deserción/reprobación**. "
+                "Esto **no es un diagnóstico**, pero sí una señal para cuidar tu proceso y buscar apoyo."
+                if pred_class == 1
+                else "✅ Según el modelo, **no apareces con un riesgo alto en este momento**, "
+                     "pero siempre es buena idea revisar tus hábitos y tus emociones."
+            )
+
             add_assistant(
-                f"Gracias por confirmar. Estimación **no diagnóstica**:\n\n"
-                f"- **Riesgo estimado:** `{st.session_state.score}` (0 a 1)\n"
-                f"- **Factores influyentes (drivers):** {', '.join(st.session_state.drivers)}\n\n"
-                "Recuerda: estos resultados son orientativos y no reemplazan el apoyo profesional."
+                "Gracias por confirmar 💚.\n\n"
+                f"{mensaje_riesgo}\n\n"
+                f"- **Riesgo estimado (0 a 1):** `{st.session_state.score}`\n"
+                f"- **Factores que parecen influir:** {', '.join(st.session_state.drivers)}\n\n"
+                "Si te parece, ahora puedo generar un **plan de acción personalizado** para que no tengas que enfrentar esto solo/a."
             )
             st.session_state.stage = "predicted"
 
     with cols[1]:
         if st.button("↩️ Volver a ingresar datos", use_container_width=True):
             st.session_state.stage = "collect"
-            add_assistant("Claro, puedes ingresar nuevamente tu perfil en texto libre cuando quieras.")
+            add_assistant(
+                "Sin problema, cuéntame de nuevo tu situación o actualiza la información que quieras 💬."
+            )
 
 # --- Etapa: Resultado de predicción
 if st.session_state.stage == "predicted":
-    st.markdown("### 🔎 Estimación y orientación")
+    st.markdown("### 🔎 Estimación y orientación inicial")
     score = st.session_state.score
     drivers = st.session_state.drivers
 
-    # Feedback inmediato
     st.metric(label="Riesgo estimado (0–1)", value=score)
 
-    # Drivers accesibles
-    st.markdown("**Factores influyentes identificados** (en lenguaje simple):")
+    st.markdown("**Factores que parecen influir en tu situación:**")
     for d in drivers:
         st.write(f"• {d}")
 
-    # Umbral de derivación
     THRESHOLD = 0.75
     if score is not None and score > THRESHOLD:
         st.error(
-            "El nivel estimado sugiere **priorizar apoyo**. "
-            "Considera conversar con tu docente/tutor/a u orientador/a para un acompañamiento oportuno.",
-            icon="🚩"
+            "El nivel estimado sugiere **priorizar apoyo y acompañamiento**. "
+            "No tienes que cargar esto solo/a. Hablar con un profesor/a, tutor/a u orientador/a puede ser un muy buen paso.",
+            icon="🚩",
         )
     else:
         st.info(
-            "Sugerencia: fortalece hábitos y solicita retroalimentación formativa. "
-            "Si sientes que necesitas apoyo adicional, conversa con tus docentes.",
-            icon="💡"
+            "Tu riesgo no aparece extremo, pero tu experiencia igual importa. "
+            "Cuidar tus hábitos y hablar cuando algo te sobrepasa sigue siendo muy importante 💛.",
+            icon="💡",
         )
 
-    # Botón para coaching
     if st.button("📝 Generar Plan Personalizado", use_container_width=True):
         payload = {
             "profile": st.session_state.profile_json,
             "score": st.session_state.score,
             "drivers": st.session_state.drivers,
         }
-        plan = call_coach(payload)
+        plan = simulate_coach(payload)
         st.session_state.plan_text = plan
-        add_assistant("He generado un plan personalizado con recomendaciones prácticas (no diagnósticas).")
+        add_assistant(
+            "Listo, armé un **plan de acción personalizado** pensado para acompañarte paso a paso. "
+            "Revísalo con calma, puedes tomar lo que te haga sentido y adaptarlo a tu realidad."
+        )
         st.session_state.stage = "coaching"
 
 # --- Etapa: Coaching + Entregables
 if st.session_state.stage == "coaching":
     st.markdown("### 🗂️ Plan Personalizado de Hábitos (no diagnóstico)")
-    st.text(st.session_state.plan_text)
+    st.markdown(st.session_state.plan_text)
 
     c1, c2 = st.columns(2)
 
     with c1:
-        # Exportar "PDF" simulado
         pdf_bytes = make_fake_pdf_bytes(st.session_state.plan_text)
         st.download_button(
             label="📄 Exportar Plan (PDF simulado)",
@@ -376,13 +459,15 @@ if st.session_state.stage == "coaching":
         )
 
     with c2:
-        # Link compartible (coloca parámetros en la URL actual)
         token = st.session_state.share_token or hex(random.getrandbits(32))[2:]
         st.session_state.share_token = token
-        _ = build_share_link(st.session_state.score, st.session_state.drivers, token)
-        st.success("🔗 Parámetros agregados a la URL. Copia el enlace desde tu navegador para compartir.")
+        st.success(
+            "🔗 Puedes copiar la URL de tu navegador para compartir esta vista del plan (si lo consideras apropiado)."
+        )
 
-    st.caption("Comparte de forma responsable. Este contenido es orientativo y no constituye diagnóstico.")
+    st.caption(
+        "Comparte y usa este contenido con cariño y responsabilidad. Es una guía, no un diagnóstico."
+    )
 
 # Render final del chat (con los nuevos mensajes)
 render_chat()
@@ -390,5 +475,6 @@ render_chat()
 # Pie de página
 st.markdown("---")
 st.caption(
-    "Demo educativa en Streamlit. Si integras FastAPI real, pon `USE_REQUESTS=True` y ajusta `API_BASE`."
+    "Demo educativa en Streamlit. Modelo de riesgo basado en datos históricos. "
+    "Esta herramienta es de acompañamiento, no reemplaza apoyo profesional."
 )
